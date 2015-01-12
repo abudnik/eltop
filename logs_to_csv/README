@@ -1,0 +1,4 @@
+Steps:
+1. extract_{one,all}_node_read.sh
+2. erase_last_slash.sh
+3. to_csv.sh
