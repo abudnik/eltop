@@ -5,6 +5,7 @@
 #include <ctime>
 #include <cstring>
 #include <boost/tokenizer.hpp>
+#include "event_stats.hpp"
 
 using namespace std;
 
@@ -13,31 +14,47 @@ struct Event
 {
     time_t time;
     string key;
-    uint64_t size;
+    mutable uint64_t size;
+
+    uint64_t get_size() const { return size; }
+    void set_size(uint64_t size) const { this->size = size; }
+
+    static bool size_compare(const Event &e1, const Event &e2) { return e1.size < e2.size; }
+    static bool time_compare(const Event &e1, time_t val) { return e1.time < val; }
+    bool operator < (const Event &e) const { return key.compare( e.key ) < 0; }
 };
 
-class Observer
+std::ostream& operator << (std::ostream& os, const Event &ev)
 {
-public:
-    virtual void NotifyObserver( Event &event ) = 0;
-    virtual ~Observer() {}
+    os << "event = {key: " << ev.key << ", time: " << ev.time << ", size: " << ev.size << "}";
+    return os;
+}
+
+
+typedef event_stats<Event> EventStats;
+typedef EventStats* EventStatsPtr;
+
+struct IObserver
+{
+    virtual void NotifyObserver( const Event &event ) = 0;
+    virtual ~IObserver() {}
 };
 
 struct IObservable
 {
-    virtual void Subscribe( Observer *observer ) = 0;
-    virtual void NotifyAll( Event &e ) = 0;
+    virtual void Subscribe( IObserver *observer ) = 0;
+    virtual void NotifyAll( const Event &e ) = 0;
 };
 
 class Observable : virtual public IObservable
 {
-    typedef vector<Observer *> Container;
+    typedef vector<IObserver *> Container;
 public:
-    virtual void Subscribe( Observer *observer )
+    virtual void Subscribe( IObserver *observer )
     {
         observers_.push_back( observer );
     }
-    virtual void NotifyAll( Event &event )
+    virtual void NotifyAll( const Event &event )
     {
         for( auto &observer : observers_ )
         {
@@ -46,6 +63,51 @@ public:
     }
 private:
     Container observers_;
+};
+
+class EventSerializationHandler : public IObserver
+{
+public:
+    EventSerializationHandler( EventStatsPtr event_stats )
+    : stats_( event_stats )
+    {}
+
+private:
+    // IObserver
+    virtual void NotifyObserver( const Event &event )
+    {
+        stats_->add_event( event, event.time );
+    }
+
+private:
+    EventStatsPtr stats_;
+};
+
+class EventStatisticsHandler : public IObserver
+{
+public:
+    EventStatisticsHandler( EventStatsPtr event_stats )
+    : stats_( event_stats )
+    {}
+
+private:
+    // IObserver
+    virtual void NotifyObserver( const Event &event )
+    {
+        typedef vector<Event> EventContainer;
+        EventContainer top;
+        stats_->get_top(50, 5*60, event.time, top);
+
+        cout << "time_t = " << event.time << '\n';
+        unsigned i = 0;
+        for( const auto e : top )
+        {
+            cout << i++ << ' ' << e << endl;
+        }
+    }
+
+private:
+    EventStatsPtr stats_;
 };
 
 class EventParser : public Observable
@@ -104,7 +166,13 @@ int main(int argc, const char* argv[])
 
     try
     {
+        EventStats stats(10 * 1000, 5 * 60);
+        EventSerializationHandler evSerialization(&stats);
+        EventStatisticsHandler evStats(&stats);
+
         EventParser parser;
+        parser.Subscribe( &evSerialization );
+        parser.Subscribe( &evStats );
         parser.Parse(argv[1]);
     }
     catch(exception &e)
