@@ -14,13 +14,13 @@ struct Event
 {
     time_t time;
     string key;
-    mutable uint64_t size;
+    uint64_t size;
 
     uint64_t get_size() const { return size; }
-    void set_size(uint64_t size) const { this->size = size; }
+    void set_size(uint64_t size) { this->size = size; }
 
     static bool size_compare(const Event &e1, const Event &e2) { return e1.size < e2.size; }
-    static bool time_compare(const Event &e1, time_t val) { return e1.time < val; }
+    static bool time_compare(const Event &e1, const Event &e2) { return e1.time < e2.time; }
     bool operator < (const Event &e) const { return key.compare( e.key ) < 0; }
 };
 
@@ -56,7 +56,7 @@ public:
     }
     virtual void NotifyAll( const Event &event )
     {
-        for( auto &observer : observers_ )
+        for( auto observer : observers_ )
         {
             observer->NotifyObserver( event );
         }
@@ -87,20 +87,42 @@ class EventStatisticsHandler : public IObserver
 {
 public:
     EventStatisticsHandler( EventStatsPtr event_stats )
-    : stats_( event_stats )
+    : stats_( event_stats ),
+     last_event_time_(0)
     {}
 
 private:
     // IObserver
     virtual void NotifyObserver( const Event &event )
     {
+        if (!last_event_time_)
+            last_event_time_ = event.time;
+
+        if ( event.time - last_event_time_ >= 1 ) // every second
+        {
+            // if more than one second elapsed since last event, then insert fake events
+            // and GetTop for those 'missed' seconds
+            const int num_fake_events = event.time - last_event_time_ - 1;
+            for(int i = 1; i <= num_fake_events; ++i)
+            {
+                const time_t missed_second = last_event_time_ + i;
+                GetTop( missed_second );
+            }
+
+            GetTop(event.time);
+            last_event_time_ = event.time;
+        }
+    }
+
+    void GetTop( time_t current_time )
+    {
         typedef vector<Event> EventContainer;
         EventContainer top;
-        stats_->get_top(50, 5*60, event.time, top);
+        stats_->get_top(50, 5*60, current_time, top);
 
-        cout << "time_t = " << event.time << '\n';
+        cout << "time_t = " << current_time << '\n';
         unsigned i = 0;
-        for( const auto e : top )
+        for( const auto& e : top )
         {
             cout << i++ << ' ' << e << endl;
         }
@@ -108,6 +130,7 @@ private:
 
 private:
     EventStatsPtr stats_;
+    time_t last_event_time_;
 };
 
 class EventParser : public Observable
@@ -131,6 +154,7 @@ public:
             for( auto& t : tokens ) {
                 switch(tok_number) {
                     case 0:
+                        memset(&tm, 0, sizeof(struct std::tm));
                         strptime(t.c_str(), "%Y-%m-%d %H:%M:%S", &tm);
                         event.time = mktime(&tm);
                         break;

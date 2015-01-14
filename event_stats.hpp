@@ -24,11 +24,11 @@ public:
     
     void add_event(const E &event, time_t time)
     {
-        events.emplace_back(event);
+        events.push_back(event);
     }
 
     template< typename ResultContainer >
-    void get_top(size_t k, int period_in_seconds, time_t time, ResultContainer &result) const
+    void get_top(size_t k, int period_in_seconds, time_t time, ResultContainer &result)
     {
         int period = min(this->period, period_in_seconds);
 
@@ -36,17 +36,19 @@ public:
         SetType last_events;
 
         typename Container::const_iterator it;
-        it = lower_bound( events.begin(), events.end(), time - period, &E::time_compare );
+        E e{time - period, "", 0};
+        it = lower_bound( events.begin(), events.end(), e, &E::time_compare );
         for( ; it != events.end(); ++it )
         {
-            typename SetType::iterator s_it = last_events.find( *it );
+            auto s_it = last_events.find( *it );
             if ( s_it == last_events.end() )
             {
                 last_events.insert( *it );
             }
             else
             {
-                s_it->set_size( s_it->get_size() + it->get_size() );
+                E &e = const_cast<E&>(*s_it);
+                e.set_size( s_it->get_size() + it->get_size() );
             }
         }
 
