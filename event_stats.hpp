@@ -5,6 +5,7 @@
 #include <functional> // not1
 #include <vector>
 #include <set>
+#include <unordered_set>
 
 using namespace std;
 
@@ -28,35 +29,55 @@ public:
     }
 
     template< typename ResultContainer >
-    void get_top(size_t k, int period_in_seconds, time_t time, ResultContainer &result)
+    void get_top(size_t k, int period_in_seconds, time_t time, ResultContainer &top_size, ResultContainer &top_freq)
     {
         int period = min(this->period, period_in_seconds);
 
-        typedef std::set<E> SetType;
-        SetType last_events;
+        typedef std::set<E> SetT;
+        SetT last_events;
 
-        typename Container::const_iterator it;
-        E e{time - period, "", 0};
+        typedef std::unordered_set<string> RequestSetT;
+        RequestSetT requests;
+
+        typename Container::iterator it;
+        E e{time - period, "", "", 0, 0};
         it = lower_bound( events.begin(), events.end(), e, &E::time_compare );
+
+        requests.reserve( std::distance(it, events.end()) );
+
         for( ; it != events.end(); ++it )
         {
             auto s_it = last_events.find( *it );
             if ( s_it == last_events.end() )
             {
-                last_events.insert( *it );
+                E ev( *it );
+                ev.freq = 1;
+                last_events.insert( ev );
+                requests.insert( ev.request );
             }
             else
             {
-                E &e = const_cast<E&>(*s_it);
-                e.set_size( s_it->get_size() + it->get_size() );
+                E &ev = const_cast<E&>(*s_it);
+                ev.set_size( s_it->get_size() + it->get_size() );
+
+                if ( requests.find( ev.request ) != requests.end() )
+                {
+                    requests.insert( ev.request );
+                    ev.set_freq( ev.get_freq() + 1 );
+                }
             }
         }
 
-        result = std::move( ResultContainer(last_events.begin(), last_events.end()) );
-        k = min(result.size(), k);
-        std::function<bool(const E&, const E&)> comparator( &E::size_compare );
-        partial_sort(result.begin(), result.begin() + k, result.end(), std::not2(comparator) );
-        result.resize(k);
+        top_size = std::move( ResultContainer(last_events.begin(), last_events.end()) );
+        k = min(top_size.size(), k);
+        std::function<decltype(E::size_compare)> comparator_size( &E::size_compare );
+        partial_sort(top_size.begin(), top_size.begin() + k, top_size.end(), std::not2(comparator_size) );
+        top_size.resize(k);
+
+        top_freq = std::move( ResultContainer(last_events.begin(), last_events.end()) );
+        std::function<decltype(E::freq_compare)> comparator_freq( &E::freq_compare );
+        partial_sort(top_freq.begin(), top_freq.begin() + k, top_freq.end(), std::not2(comparator_freq) );
+        top_freq.resize(k);
     }
 
 private:

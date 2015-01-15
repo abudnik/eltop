@@ -13,20 +13,27 @@ using namespace std;
 struct Event
 {
     time_t time;
+    string request;
     string key;
     uint64_t size;
+    uint64_t freq;
 
     uint64_t get_size() const { return size; }
     void set_size(uint64_t size) { this->size = size; }
 
+    uint64_t get_freq() const { return freq; }
+    void set_freq(uint64_t freq) { this->freq = freq; }
+
     static bool size_compare(const Event &e1, const Event &e2) { return e1.size < e2.size; }
     static bool time_compare(const Event &e1, const Event &e2) { return e1.time < e2.time; }
+    static bool freq_compare(const Event &e1, const Event &e2) { return e1.freq < e2.freq; }
     bool operator < (const Event &e) const { return key.compare( e.key ) < 0; }
 };
 
-std::ostream& operator << (std::ostream& os, const Event &ev)
+std::ostream& operator << (std::ostream& os, const Event &e)
 {
-    os << "event = {key: " << ev.key << ", time: " << ev.time << ", size: " << ev.size << "}";
+    os << "event = {key: " << e.key << ", request: " << e.request
+       << ", freq: " << e.freq << ", time: " << e.time << ", size: " << e.size << "}";
     return os;
 }
 
@@ -88,7 +95,8 @@ class EventStatisticsHandler : public IObserver
 public:
     EventStatisticsHandler( EventStatsPtr event_stats )
     : stats_( event_stats ),
-     last_event_time_(0)
+     last_event_time_(0),
+     max_freq(0)
     {}
 
 private:
@@ -117,20 +125,44 @@ private:
     void GetTop( time_t current_time )
     {
         typedef vector<Event> EventContainer;
-        EventContainer top;
-        stats_->get_top(50, 5*60, current_time, top);
+        EventContainer top_size, top_freq;
+        stats_->get_top(50, 5*60, current_time, top_size, top_freq);
 
         cout << "time_t = " << current_time << '\n';
-        unsigned i = 0;
-        for( const auto& e : top )
+        
+        cout << "top by size" << '\n';
+
+        int intersect = 0;
+        int i = 0;
+        for( const auto& e : top_size )
         {
-            cout << i++ << ' ' << e << endl;
+            cout << i++ << ' ' << e << '\n';
+
+            for( const auto& ev : top_freq ) {
+                if (e.key == ev.key)
+                {
+                    ++intersect;
+                    break;
+                }
+            }
         }
+
+        cout << "top by frequency" << '\n';
+        i = 0;
+        for( const auto& e : top_freq )
+        {
+            cout << i++ << ' ' << e << '\n';
+            if (e.freq > max_freq) max_freq = e.freq;
+        }
+
+        cout << "intersect= " << intersect << '\n';
+        cout << "max_freq= " << max_freq << endl;
     }
 
 private:
     EventStatsPtr stats_;
     time_t last_event_time_;
+    uint64_t max_freq;
 };
 
 class EventParser : public Observable
@@ -141,12 +173,14 @@ public:
         ifstream file(file_name);
         string line;
         unsigned line_num = 0;
+        size_t pos;
         struct std::tm tm;
 
         typedef boost::char_separator<char> Separator;
         Separator sep(",");
 
         Event event;
+        event.freq = 0;
         while( getline( file, line ) )
         {
             boost::tokenizer<Separator> tokens(line, sep);
@@ -159,16 +193,23 @@ public:
                         event.time = mktime(&tm);
                         break;
                     case 1:
-                        event.key = move(t);
+                        pos = t.find('/');
+                        if (pos != string::npos)
+                            event.request = std::move( string(t,0,pos) );
+                        else
+                            event.request.clear();
                         break;
                     case 2:
+                        event.key = move(t);
+                        break;
+                    case 3:
                         event.size = stoull(t);
                         break;
                 }
                 ++tok_number;
             }
 
-            if ( tok_number == 3 ) {
+            if ( tok_number == 4 ) {
                 NotifyAll( event );
             } else {
                 cerr << "failed parse line: " << line_num << ": " << line << endl;
