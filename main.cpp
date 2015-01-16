@@ -231,7 +231,7 @@ int main(int argc, const char* argv[])
 
     try
     {
-        EventStats stats(10 * 1000, 5 * 60);
+        EventStats stats(10 * 1000, 50, 5 * 60);
         EventSerializationHandler evSerialization(&stats);
         EventStatisticsHandler evStats(&stats);
 
