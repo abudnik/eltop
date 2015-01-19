@@ -4,13 +4,21 @@
 #include <algorithm>
 #include <functional> // not1
 #include <vector>
+#include <list>
 #include <set>
 #include <unordered_set>
 #include <memory>
+#include "treap.hpp"
+
+#include <iostream>
 
 using namespace std;
 
-#if 0
+//#define TOP_SIMPLE
+//#define TOP_SLICES
+#define TOP_LRU
+
+#ifdef TOP_SIMPLE
 // Simple event_stats implementation, used for ADT interface specification.
 // May be used as reference impl.
 template<typename E>
@@ -22,7 +30,7 @@ public:
     : period(period_in_seconds)
     {
     }
-    
+
     void add_event(const E &event, time_t time)
     {
         events.push_back(event);
@@ -84,8 +92,9 @@ private:
     int period;
     Container events;
 };
-#endif // 0
+#endif // TOP_SIMPLE
 
+#ifdef TOP_SLICES
 template<typename E>
 class event_stats
 {
@@ -312,5 +321,124 @@ private:
     TopSlice *slice_head, *slice_tail;
     time_t last_event_time;
 };
+#endif // TOP_SLICES
+
+#ifdef TOP_LRU
+template<typename E>
+class node_t : public treap_node_t< node_t<E> >
+{
+public:
+    node_t(const E &e) : item(e) {}
+
+    const char *key() const { return item.key.c_str(); }
+
+    size_t eventtime() const { return item.time; }
+
+    size_t get_size() const { return item.size; }
+
+    const E &get_item() const { return item; }
+
+    void update_size( time_t time, size_t window_size, size_t size )
+    {
+        double delta = 1. - double( (time - item.time) / window_size );
+        if (delta < 0.) delta = 0.;
+        item.size = delta * item.size + size;
+    }
+
+    void update_time( time_t time )
+    {
+        item.time = time;
+    }
+
+private:
+    E item;
+};
+
+template<typename E>
+class event_stats
+{
+    typedef treap< node_t<E> > treap_t;
+public:
+    event_stats(size_t events_limit, size_t top_k, int period_in_seconds)
+    : num_events(0),
+     max_events(events_limit),
+     period(period_in_seconds)
+    {
+    }
+
+    void add_event(const E &event, time_t time)
+    {
+        typename treap_t::p_node_type it = treap.find( reinterpret_cast<typename treap_t::key_type>( event.key.c_str() ) );
+        if (it)
+        {
+            it->update_size( time, period, event.size );
+            it->update_time( time );
+            treap.decrease_key(it);
+        }
+        else
+        {
+            if (num_events < max_events)
+            {
+                treap.insert( new node_t<E>(event) );
+                ++num_events;
+            }
+            else
+            {
+                typename treap_t::p_node_type t = treap.top();
+                treap.erase(t);
+                delete t;
+                treap.insert( new node_t<E>(event) );
+            }
+        }
+    }
+
+    template< typename ResultContainer >
+    void get_top(size_t k, int period_in_seconds, time_t time, ResultContainer &top_size, ResultContainer &top_freq)
+    {
+        int period = min(this->period, period_in_seconds);
+
+        vector< typename treap_t::p_node_type > top_size_nodes;
+        treap_to_container( treap.top(), top_size_nodes );
+
+        for( auto e : top_size_nodes )
+        {
+            e->update_size( time, period, 0 );
+            if ( e->get_size() == 0 )
+            {
+                treap.erase( e );
+                delete e;
+                --num_events;
+            }
+            else
+            {
+                 top_size.push_back( e->get_item() );
+            }
+        }
+
+        k = min(top_size.size(), k);
+        std::function<decltype(E::size_compare)> comparator_size( &E::size_compare );
+        partial_sort(top_size.begin(), top_size.begin() + k, top_size.end(), std::not2(comparator_size) );
+        top_size.resize(k);
+    }
+
+private:
+    template<typename Container>
+    void treap_to_container( const typename treap_t::p_node_type node, Container &container ) const
+    {
+        if ( node )
+        {
+            container.push_back( node );
+            treap_to_container( node->l, container );
+            treap_to_container( node->r, container ); 
+        }
+    }
+
+private:
+    size_t num_events;
+    size_t max_events;
+    int period;
+    treap_t treap;    
+};
+#endif // TOP_LRU
 
 #endif // EVENT_STATS_HPP
