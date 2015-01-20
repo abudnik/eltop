@@ -17,6 +17,7 @@ struct Event
     string key;
     uint64_t size;
     uint64_t freq;
+    double freq_double;
 
     uint64_t get_size() const { return size; }
     void set_size(uint64_t size) { this->size = size; }
@@ -24,16 +25,20 @@ struct Event
     uint64_t get_freq() const { return freq; }
     void set_freq(uint64_t freq) { this->freq = freq; }
 
+    double get_freq_double() const { return freq_double; }
+    void set_freq(double freq) { this->freq_double = freq; }
+
     static bool size_compare(const Event &e1, const Event &e2) { return e1.size < e2.size; }
     static bool time_compare(const Event &e1, const Event &e2) { return e1.time < e2.time; }
     static bool freq_compare(const Event &e1, const Event &e2) { return e1.freq < e2.freq; }
+    static bool freq_double_compare(const Event &e1, const Event &e2) { return e1.freq_double < e2.freq_double; }
     bool operator < (const Event &e) const { return key.compare( e.key ) < 0; }
 };
 
 std::ostream& operator << (std::ostream& os, const Event &e)
 {
     os << "event = {key: " << e.key << ", request: " << e.request
-       << ", freq: " << e.freq << ", time: " << e.time << ", size: " << e.size << "}";
+       << ", freq: " << e.freq << ", freq_d: " << e.freq_double << ", time: " << e.time << ", size: " << e.size << "}";
     return os;
 }
 
@@ -124,19 +129,23 @@ private:
 
     void GetTop( time_t current_time )
     {
+        uint64_t total_size = 0;
+        int intersect = 0;
+        int i = 0;
+
         typedef vector<Event> EventContainer;
         EventContainer top_size, top_freq;
         stats_->get_top(50, 5*60, current_time, top_size, top_freq);
 
-        cout << "time_t = " << current_time << '\n';
-        
-        cout << "top by size" << '\n';
+        //PrintTopKeys( top_size ); return;
 
-        int intersect = 0;
-        int i = 0;
+        cout << "time_t = " << current_time << '\n';
+
+        cout << "top by size" << '\n';
         for( const auto& e : top_size )
         {
             cout << i++ << ' ' << e << '\n';
+            total_size += e.get_size();
 
             for( const auto& ev : top_freq ) {
                 if (e.key == ev.key)
@@ -156,7 +165,18 @@ private:
         }
 
         cout << "intersect= " << intersect << '\n';
-        cout << "max_freq= " << max_freq << endl;
+        cout << "max_freq= " << max_freq << '\n';
+        cout << total_size << endl;
+    }
+
+    template<typename Container>
+    void PrintTopKeys( const Container &top_size ) const
+    {
+        for( const auto& e : top_size )
+        {
+            cout << e.key << '\n';
+        }
+        cout << "***" << endl;
     }
 
 private:
@@ -180,7 +200,8 @@ public:
         Separator sep(",");
 
         Event event;
-        event.freq = 0;
+        event.freq = 1;
+        event.freq_double = 1.;
         while( getline( file, line ) )
         {
             boost::tokenizer<Separator> tokens(line, sep);
