@@ -48,7 +48,7 @@ public:
         RequestSetT requests;
 
         typename Container::const_iterator it;
-        E e{time - period, "", "", 0, 0};
+        E e{time - period, "", "", 0, 0, 0.};
         it = lower_bound( events.begin(), events.end(), e, &E::time_compare );
 
         requests.reserve( std::distance(it, events.end()) );
@@ -202,7 +202,6 @@ public:
                 if ( f_it == events_freq.end() )
                 {
                     E ev( event_freq );
-                    ev.freq = 1;
                     events_freq.insert( ev );
                     requests.insert( ev.request );
                 }
@@ -270,7 +269,6 @@ private:
             if ( s_it == last_events.end() )
             {
                 E ev( events[i] );
-                ev.freq = 1;
                 last_events.insert( ev );
                 requests.insert( ev.request );
             }
@@ -340,14 +338,33 @@ public:
 
     void update_size( time_t time, size_t window_size, size_t size )
     {
-        double delta = 1. - double( (time - item.time) / window_size );
-        if (delta < 0.) delta = 0.;
+        double delta = compute_delta( time, item.time, window_size );
         item.size = delta * item.size + size;
+    }
+
+    void check_expiration( time_t time, size_t window_size )
+    {
+        if (time - item.time > window_size)
+            item.size = 0;
     }
 
     void update_time( time_t time )
     {
         item.time = time;
+    }
+
+    void update_freq( time_t time, size_t window_size, double freq )
+    {
+        double delta = compute_delta( time, item.time, window_size );
+        item.freq_double = delta * item.freq_double + freq;
+    }
+
+private:
+    inline double compute_delta( time_t current_time, time_t last_time, size_t window_size ) const
+    {
+        double delta = 1. - (current_time - last_time) / (double)window_size;
+        if (delta < 0.) delta = 0.;
+        return delta;
     }
 
 private:
@@ -372,6 +389,7 @@ public:
         if (it)
         {
             it->update_size( time, period, event.size );
+            it->update_freq( time, period, 1. );
             it->update_time( time );
             treap.decrease_key(it);
         }
@@ -397,21 +415,22 @@ public:
     {
         int period = min(this->period, period_in_seconds);
 
-        vector< typename treap_t::p_node_type > top_size_nodes;
-        treap_to_container( treap.top(), top_size_nodes );
+        vector< typename treap_t::p_node_type > top_nodes;
+        treap_to_container( treap.top(), top_nodes );
 
-        for( auto e : top_size_nodes )
+        for( auto n : top_nodes )
         {
-            e->update_size( time, period, 0 );
-            if ( e->get_size() == 0 )
+            n->check_expiration( time, period );
+            if ( n->get_size() == 0 )
             {
-                treap.erase( e );
-                delete e;
+                treap.erase( n );
+                delete n;
                 --num_events;
             }
             else
             {
-                 top_size.push_back( e->get_item() );
+                 top_size.push_back( n->get_item() );
+                 top_freq.push_back( n->get_item() );
             }
         }
 
@@ -419,6 +438,10 @@ public:
         std::function<decltype(E::size_compare)> comparator_size( &E::size_compare );
         partial_sort(top_size.begin(), top_size.begin() + k, top_size.end(), std::not2(comparator_size) );
         top_size.resize(k);
+
+        std::function<decltype(E::freq_double_compare)> comparator_freq( &E::freq_double_compare );
+        partial_sort(top_freq.begin(), top_freq.begin() + k, top_freq.end(), std::not2(comparator_freq) );
+        top_freq.resize(k);
     }
 
 private:
@@ -437,7 +460,7 @@ private:
     size_t num_events;
     size_t max_events;
     int period;
-    treap_t treap;    
+    treap_t treap;
 };
 #endif // TOP_LRU
 
